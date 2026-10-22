@@ -90,6 +90,88 @@ def get_channel_videos(channel_url, max_results=0):
     return videos
 
 
+def get_cookie_file():
+    """Obtiene la ruta del archivo de cookies, creándolo desde la variable de entorno si existe."""
+    env_cookies = os.getenv("YOUTUBE_COOKIES", "").strip()
+    if env_cookies:
+        import tempfile
+        tmp_cookie = os.path.join(tempfile.gettempdir(), "youtube_cookies.txt")
+        try:
+            with open(tmp_cookie, "w", encoding="utf-8") as f:
+                f.write(env_cookies)
+            return tmp_cookie
+        except Exception as e:
+            print(f"[Cookies] Error escribiendo cookies de entorno: {e}")
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    local_cookie = os.path.join(base_dir, "cookies.txt")
+    if os.path.exists(local_cookie):
+        return local_cookie
+    if os.path.exists("cookies.txt"):
+        return os.path.abspath("cookies.txt")
+    return None
+
+def parse_vtt_subtitles(content, include_timestamps=False):
+    """Parsea el contenido de un archivo VTT o SRT descargado por yt-dlp y elimina duplicados."""
+    lines = []
+    blocks = re.split(r'\n\s*\n', content)
+    last_text = ''
+    for b in blocks:
+        b = b.strip()
+        if not b or b.startswith('WEBVTT') or b.startswith('Kind:') or b.startswith('Language:'):
+            continue
+        parts = b.split('\n')
+        time_part = None
+        text_lines = []
+        for line in parts:
+            if '-->' in line:
+                time_part = line.split('-->')[0].strip().split('.')[0]
+            elif not line.isdigit():
+                cleaned = re.sub(r'<[^>]+>', '', line).strip()
+                if cleaned:
+                    text_lines.append(cleaned)
+        if text_lines:
+            text = ' '.join(text_lines)
+            if text != last_text:
+                if include_timestamps and time_part:
+                    lines.append(f'[{time_part}] {text}')
+                else:
+                    lines.append(text)
+                last_text = text
+    return '\n'.join(lines) if lines else None
+
+def load_cookies_to_playwright(context, cookie_file):
+    """Carga cookies de Netscape a un contexto de Playwright."""
+    if not cookie_file or not os.path.exists(cookie_file):
+        return
+    cookies = []
+    try:
+        with open(cookie_file, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                parts = line.split('\t')
+                if len(parts) >= 7:
+                    domain, flag, path, secure, expiration, name, value = parts[:7]
+                    if 'youtube' in domain or 'google' in domain:
+                        try:
+                            exp = float(expiration) if expiration.isdigit() else -1
+                        except Exception:
+                            exp = -1
+                        cookies.append({
+                            'name': name,
+                            'value': value,
+                            'domain': domain,
+                            'path': path,
+                            'secure': secure.lower() == 'true',
+                            'expires': exp
+                        })
+        if cookies:
+            context.add_cookies(cookies)
+            print(f"[Cookies] Cargadas {len(cookies)} cookies en Playwright con éxito.")
+    except Exception as e:
+        print(f"[Cookies] Error cargando cookies en Playwright: {e}")
+
 _whisper_model = None
 WHISPER_MODEL_SIZE = "base"
 
@@ -120,18 +202,21 @@ def transcribe_with_whisper(video_id, include_timestamps=False, language="es"):
     tmpdir = tempfile.mkdtemp()
     audio_template = os.path.join(tmpdir, f"{video_id}.%(ext)s")
 
+    cookie_file = get_cookie_file()
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': audio_template,
         'quiet': True,
         'no_warnings': True,
         'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '128'}],
-        'extractor_args': {'youtube': {'player_client': ['android', 'mweb']}},
+        'extractor_args': {'youtube': {'player_client': ['ios', 'android', 'mweb']}},
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 12; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15',
             'Accept-Language': 'es-ES,es;q=0.9'
         }
     }
+    if cookie_file:
+        ydl_opts['cookiefile'] = cookie_file
 
     downloaded_path = None
     try:
@@ -211,6 +296,12 @@ def fetch_transcript_via_timedtext(video_id, include_timestamps=False):
             context = browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
             )
+
+            # Cargar cookies de sesión si existen
+            cookie_file = get_cookie_file()
+            if cookie_file:
+                load_cookies_to_playwright(context, cookie_file)
+
             # Cookie para aceptar automáticamente el diálogo de consentimiento de Google/YouTube
             try:
                 context.add_cookies([
@@ -318,12 +409,58 @@ def fetch_transcript_via_timedtext(video_id, include_timestamps=False):
 def fetch_transcript(video_id, languages=('es', 'es-419', 'es-ES', 'es-MX', 'en'), include_timestamps=False, use_whisper=True):
     """
     Fetch transcript combinando 4 métodos en cascada:
-      1. Playwright con Chromium (--no-sandbox)
-      2. youtube-transcript-api (directo y listado)
-      3. yt-dlp con clientes móviles (ios, android, mweb)
+      1. Descarga directa de subtítulos oficiales o autogenerados con yt-dlp y cookies
+      2. Playwright con Chromium (--no-sandbox) y cookies
+      3. youtube-transcript-api (directo y listado)
       4. Whisper local (speech-to-text de respaldo)
     """
     import time
+    cookie_file = get_cookie_file()
+    if cookie_file:
+        print(f"[Cookies] Usando archivo de cookies: {cookie_file}")
+
+    # Método 1: Descarga directa de subtítulos oficiales o autogenerados con yt-dlp y cookies
+    try:
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'skip_download': True,
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': list(languages) + ['es', 'es-419', 'en'],
+            'outtmpl': os.path.join(tmpdir, '%(id)s.%(ext)s'),
+        }
+        if cookie_file:
+            ydl_opts['cookiefile'] = cookie_file
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+
+        sub_files = [f for f in os.listdir(tmpdir) if f.endswith(('.vtt', '.srt', '.ttml'))]
+        if sub_files:
+            sub_file = next((f for f in sub_files if '.es' in f), sub_files[0])
+            sub_path = os.path.join(tmpdir, sub_file)
+            with open(sub_path, 'r', encoding='utf-8', errors='ignore') as sf:
+                vtt_text = sf.read()
+            text = parse_vtt_subtitles(vtt_text, include_timestamps=include_timestamps)
+            try:
+                for f in os.listdir(tmpdir):
+                    os.remove(os.path.join(tmpdir, f))
+                os.rmdir(tmpdir)
+            except Exception:
+                pass
+            if text:
+                print(f"[Subtítulos] ¡Éxito instantáneo con yt-dlp ({sub_file}) para {video_id}!")
+                return text
+        else:
+            try:
+                os.rmdir(tmpdir)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[Subtítulos yt-dlp] Error: {str(e)[:120]}")
 
     def parse_snippets(items, include_timestamps):
         lines = []
@@ -339,7 +476,7 @@ def fetch_transcript(video_id, languages=('es', 'es-419', 'es-ES', 'es-MX', 'en'
                 lines.append(text)
         return "\n".join(lines) if lines else None
 
-    # Método 1: Playwright (Chromium sin sandbox)
+    # Método 2: Playwright (Chromium sin sandbox y con cookies)
     pw_result = fetch_transcript_via_timedtext(video_id, include_timestamps=include_timestamps)
     if pw_result:
         return pw_result
