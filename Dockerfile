@@ -27,6 +27,9 @@ RUN pip install --no-cache-dir \
 # Instalar Playwright y Chromium
 RUN playwright install chromium --with-deps
 
+# Pre-descargar modelo Whisper base en caché
+RUN python -c "import whisper; whisper.load_model('base')"
+
 # Copiar el resto del proyecto
 COPY . .
 

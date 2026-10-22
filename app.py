@@ -1,4 +1,4 @@
-﻿import os
+import os
 import re
 import json
 import urllib.request
@@ -189,35 +189,55 @@ def transcribe_with_whisper(video_id, include_timestamps=False, language="es"):
 
 def fetch_transcript_via_timedtext(video_id, include_timestamps=False):
     """
-    Usa Playwright para interceptar la URL de timedtext de YouTube.
+    Usa Playwright para abrir YouTube en Chromium con --no-sandbox e interceptar o extraer los subtítulos directos.
     """
     import json
-    print(f"[Timedtext] Intentando capturar URL timedtext de {video_id}...")
+    print(f"[Timedtext] Intentando capturar subtítulos con Playwright para {video_id}...")
     timedtext_url = None
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--no-first-run',
+                    '--no-zygote'
+                ]
+            )
             context = browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
             )
+            # Cookie para aceptar automáticamente el diálogo de consentimiento de Google/YouTube
+            try:
+                context.add_cookies([
+                    {"name": "SOCS", "value": "CAESEwgDEgk2MTQ5MjAwNzQaAmVuIAEaBgiA_LyaBg", "domain": ".youtube.com", "path": "/"}
+                ])
+            except Exception:
+                pass
 
             def handle_request(request):
                 nonlocal timedtext_url
                 if "/api/timedtext?" in request.url and timedtext_url is None:
                     timedtext_url = request.url
-                    print(f"[Timedtext] URL capturada: {timedtext_url[:80]}...")
+                    print(f"[Timedtext] URL interceptada: {timedtext_url[:80]}...")
 
             page = context.new_page()
             page.on("request", handle_request)
 
-            page.goto(f"https://www.youtube.com/watch?v={video_id}", wait_until="domcontentloaded")
+            page.goto(f"https://www.youtube.com/watch?v={video_id}", wait_until="domcontentloaded", timeout=25000)
 
-            for _ in range(30):
+            for _ in range(20):
                 if timedtext_url:
                     break
                 page.wait_for_timeout(500)
 
+            json3_data = None
+
+            # Si no capturó la request por evento, extraer del objeto ytInitialPlayerResponse
             if not timedtext_url:
                 captions_data = page.evaluate('''() => {
                     try {
@@ -237,33 +257,36 @@ def fetch_transcript_via_timedtext(video_id, include_timestamps=False):
                     if track:
                         timedtext_url = track['baseUrl'] + "&fmt=json3"
 
-            browser.close()
-
-            if not timedtext_url:
-                print(f"[Timedtext] No se encontraron subtítulos para {video_id}")
-                return None
-
-            req = urllib.request.Request(timedtext_url, headers={
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36'
-            })
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                raw = resp.read().decode('utf-8')
-
-            if 'fmt=json3' not in timedtext_url and not raw.strip().startswith('{'):
-                json_url = timedtext_url + "&fmt=json3"
-                req2 = urllib.request.Request(json_url, headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36'
-                })
-                with urllib.request.urlopen(req2, timeout=15) as resp2:
-                    raw = resp2.read().decode('utf-8')
+            # Intentar obtener el JSON directamente en el contexto del navegador para mantener sesión y cookies
+            if timedtext_url:
+                fetch_url = timedtext_url if 'fmt=json3' in timedtext_url else (timedtext_url + '&fmt=json3')
+                try:
+                    json3_data = page.evaluate('''async (url) => {
+                        try {
+                            const res = await fetch(url);
+                            return await res.json();
+                        } catch(e) {
+                            return null;
+                        }
+                    }''', fetch_url)
+                except Exception as eval_err:
+                    print(f"[Timedtext] Error fetch interno en navegador: {eval_err}")
 
             try:
-                json3_data = json.loads(raw)
+                browser.close()
             except Exception:
-                print(f"[Timedtext] Respuesta no es JSON valido.")
-                return None
+                pass
 
-            if 'events' not in json3_data:
+            if not json3_data and timedtext_url:
+                req = urllib.request.Request(timedtext_url, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36'
+                })
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    raw = resp.read().decode('utf-8')
+                    json3_data = json.loads(raw)
+
+            if not json3_data or 'events' not in json3_data:
+                print(f"[Timedtext] No se pudieron extraer eventos de subtítulos para {video_id}")
                 return None
 
             lines = []
@@ -275,7 +298,7 @@ def fetch_transcript_via_timedtext(video_id, include_timestamps=False):
                         lines.append((t_sec, seg_text.replace('\n', ' ')))
 
             if not lines:
-                print(f"[Timedtext] Sin lineas de texto para {video_id}")
+                print(f"[Timedtext] Sin líneas de texto para {video_id}")
                 return None
 
             result = []
@@ -284,21 +307,21 @@ def fetch_transcript_via_timedtext(video_id, include_timestamps=False):
                     result.append(f"[{format_timestamp(t_sec)}] {text}")
                 else:
                     result.append(text)
-            print(f"[Timedtext] OK: {len(result)} lineas para {video_id}")
+            print(f"[Timedtext] ¡Éxito vía Playwright!: {len(result)} líneas para {video_id}")
             return "\n".join(result)
 
     except Exception as e:
-        print(f"[Timedtext] Error: {e}")
+        print(f"[Timedtext] Error en Playwright: {e}")
         return None
 
 
 def fetch_transcript(video_id, languages=('es', 'es-419', 'es-ES', 'es-MX', 'en'), include_timestamps=False, use_whisper=True):
     """
-    Fetch transcript:
-      1. Playwright timedtext intercept
-      2. youtube-transcript-api
-      3. yt-dlp subtitle download
-      4. Whisper (offline speech-to-text)
+    Fetch transcript combinando 4 métodos en cascada:
+      1. Playwright con Chromium (--no-sandbox)
+      2. youtube-transcript-api (directo y listado)
+      3. yt-dlp con clientes móviles (ios, android, mweb)
+      4. Whisper local (speech-to-text de respaldo)
     """
     import time
 
@@ -316,95 +339,103 @@ def fetch_transcript(video_id, languages=('es', 'es-419', 'es-ES', 'es-MX', 'en'
                 lines.append(text)
         return "\n".join(lines) if lines else None
 
-    rate_limited = False
+    # Método 1: Playwright (Chromium sin sandbox)
+    pw_result = fetch_transcript_via_timedtext(video_id, include_timestamps=include_timestamps)
+    if pw_result:
+        return pw_result
 
-    cookies_result = fetch_transcript_via_timedtext(video_id, include_timestamps=include_timestamps)
-    if cookies_result:
-        print(f"[Timedtext] OK via intercept para {video_id}")
-        return cookies_result
-
+    # Método 2: youtube-transcript-api
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
         ytt = YouTubeTranscriptApi()
-        result = ytt.fetch(video_id, languages=list(languages))
-        snippets = list(result)
-        text = parse_snippets(snippets, include_timestamps)
-        if text:
-            print(f"[Subtítulos] OK via youtube-transcript-api para {video_id}")
-            return text
+        try:
+            result = ytt.fetch(video_id, languages=list(languages))
+            text = parse_snippets(list(result), include_timestamps)
+            if text:
+                print(f"[Subtítulos] OK via youtube-transcript-api (fetch) para {video_id}")
+                return text
+        except Exception:
+            tl = ytt.list(video_id)
+            for lang in list(languages) + ['es', 'en']:
+                try:
+                    transcript = tl.find_transcript([lang])
+                    text = parse_snippets(list(transcript.fetch()), include_timestamps)
+                    if text:
+                        print(f"[Subtítulos] OK via youtube-transcript-api (manual) para {video_id}")
+                        return text
+                except Exception:
+                    pass
+                try:
+                    transcript = tl.find_generated_transcript([lang])
+                    text = parse_snippets(list(transcript.fetch()), include_timestamps)
+                    if text:
+                        print(f"[Subtítulos] OK via youtube-transcript-api (generado) para {video_id}")
+                        return text
+                except Exception:
+                    pass
     except Exception as e:
-        msg = str(e)
-        print(f"[Subtítulos] youtube-transcript-api falló para {video_id}: {msg[:120]}")
-        if '429' in msg or 'Too Many' in msg or 'blocked' in msg.lower() or 'IPBlocked' in msg:
-            rate_limited = True
+        print(f"[Subtítulos] youtube-transcript-api falló para {video_id}: {str(e)[:100]}")
 
-    if not rate_limited:
-        delays = [3, 8, 20]
-        for attempt, delay in enumerate(delays):
-            try:
-                ydl_opts = {
-                    'skip_download': True,
-                    'writesubtitles': True,
-                    'writeautomaticsub': True,
-                    'subtitleslangs': list(languages),
-                    'quiet': True,
-                    'no_warnings': True,
-                    'extractor_args': {'youtube': {'player_client': ['android', 'mweb']}},
-                    'http_headers': {
-                        'User-Agent': 'Mozilla/5.0 (Linux; Android 12; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-                        'Accept-Language': 'es-ES,es;q=0.9,es-419;q=0.8'
-                    }
-                }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-                    subs = info.get('subtitles') or info.get('automatic_captions') or {}
+    # Método 3: yt-dlp con extractor variado
+    try:
+        ydl_opts = {
+            'skip_download': True,
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': list(languages) + ['es', 'en'],
+            'quiet': True,
+            'no_warnings': True,
+            'extractor_args': {'youtube': {'player_client': ['ios', 'android', 'mweb']}},
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+                'Accept-Language': 'es-ES,es;q=0.9,es-419;q=0.8'
+            }
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            subs = info.get('subtitles') or info.get('automatic_captions') or {}
 
-                    lang_key = None
-                    for l in list(languages) + ['es']:
-                        if l in subs:
-                            lang_key = l
-                            break
-                    if not lang_key:
-                        es_keys = [k for k in subs if k.startswith('es')]
-                        lang_key = es_keys[0] if es_keys else (list(subs.keys())[0] if subs else None)
-
-                    if lang_key:
-                        formats = subs[lang_key]
-                        json3_fmt = next((f for f in formats if f.get('ext') == 'json3'), None) or (formats[0] if formats else None)
-                        if json3_fmt:
-                            req = urllib.request.Request(
-                                json3_fmt['url'],
-                                headers={
-                                    'User-Agent': 'Mozilla/5.0 (Linux; Android 12; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-                                    'Accept-Language': 'es-ES,es;q=0.9'
-                                }
-                            )
-                            with urllib.request.urlopen(req, timeout=15) as resp:
-                                data = json.loads(resp.read().decode('utf-8'))
-                                lines = []
-                                for event in data.get('events', []):
-                                    if 'segs' in event:
-                                        seg_text = ''.join([s.get('utf8', '') for s in event['segs']]).strip()
-                                        if seg_text and seg_text != '\n':
-                                            t_sec = event.get('tStartMs', 0) / 1000.0
-                                            if include_timestamps:
-                                                lines.append(f"[{format_timestamp(t_sec)}] {seg_text}")
-                                            else:
-                                                lines.append(seg_text)
-                                if lines:
-                                    print(f"[Subtítulos] OK via yt-dlp para {video_id}")
-                                    return "\n".join(lines)
-            except Exception as e:
-                errmsg = str(e)
-                print(f"[yt-dlp] Intento {attempt+1} falló para {video_id}: {errmsg[:80]}")
-                if '429' in errmsg or 'Too Many' in errmsg:
-                    rate_limited = True
-                    print(f"  Rate limit — saltando a Whisper directamente")
+            lang_key = None
+            for l in list(languages) + ['es']:
+                if l in subs:
+                    lang_key = l
                     break
-                time.sleep(delay)
+            if not lang_key:
+                es_keys = [k for k in subs if k.startswith('es')]
+                lang_key = es_keys[0] if es_keys else (list(subs.keys())[0] if subs else None)
 
+            if lang_key:
+                formats = subs[lang_key]
+                json3_fmt = next((f for f in formats if f.get('ext') == 'json3'), None) or (formats[0] if formats else None)
+                if json3_fmt:
+                    req = urllib.request.Request(
+                        json3_fmt['url'],
+                        headers={
+                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15',
+                            'Accept-Language': 'es-ES,es;q=0.9'
+                        }
+                    )
+                    with urllib.request.urlopen(req, timeout=15) as resp:
+                        data = json.loads(resp.read().decode('utf-8'))
+                        lines = []
+                        for event in data.get('events', []):
+                            if 'segs' in event:
+                                seg_text = ''.join([s.get('utf8', '') for s in event['segs']]).strip()
+                                if seg_text and seg_text not in ('\n', '\\n'):
+                                    t_sec = event.get('tStartMs', 0) / 1000.0
+                                    if include_timestamps:
+                                        lines.append(f"[{format_timestamp(t_sec)}] {seg_text}")
+                                    else:
+                                        lines.append(seg_text)
+                        if lines:
+                            print(f"[Subtítulos] OK via yt-dlp para {video_id}")
+                            return "\n".join(lines)
+    except Exception as e:
+        print(f"[yt-dlp] Extracción de subtítulos falló para {video_id}: {str(e)[:100]}")
+
+    # Método 4: Whisper como respaldo
     if use_whisper:
-        print(f"[Whisper] Usando transcripción local para {video_id}...")
+        print(f"[Whisper] Intentando transcripción por audio local para {video_id}...")
         text = transcribe_with_whisper(video_id, include_timestamps=include_timestamps)
         if text:
             print(f"[Whisper] OK para {video_id}")
