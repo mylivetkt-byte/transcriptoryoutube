@@ -1,0 +1,8 @@
+El sistema está listo para transcribir, pero el problema principal es que YouTube bloquea la descarga de audio en muchos casos. 
+
+Recomendaciones específicas:
+1. Usa IDs de video específicos (ej: "dQw4w9WgXcQ"), no URLs de canales
+2. Prueba con este video de prueba: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+3. Si falla, prueba con otro video conocido que funcione
+
+El núcleo del sistema (Whisper) funciona correctamente - el problema es la descarga de audio de YouTube.

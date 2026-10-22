@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Test audio files
+test_audio.mp3
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Transcripciones generadas
+transcripciones/
+predicaciones/
+predicaciones_test/

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transcriptor de Predicaciones - YouTube</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <i class="fa-solid fa-microphone-lines"></i>
+                </div>
+                <div>
+                    <h1>Transcriptor de Predicaciones</h1>
+                    <p class="subtitle">Extrae el listado de prédicas de cualquier canal de YouTube y conviértelas a texto</p>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Search Bar Card -->
+        <main class="main-content">
+            <section class="search-card">
+                <form id="channel-form" class="search-form">
+                    <div class="input-wrapper">
+                        <i class="fa-brands fa-youtube input-icon"></i>
+                        <input 
+                            type="url" 
+                            id="channel-url" 
+                            placeholder="Pega la URL del canal (ej. https://www.youtube.com/@iglesiacmg)" 
+                            required
+                            value="https://www.youtube.com/@iglesiacmg"
+                        >
+                    </div>
+                    <div class="options-wrapper">
+                        <label class="control-label">
+                            <i class="fa-solid fa-folder-open"></i>
+                            <span>Carpeta de guardado:</span>
+                            <input type="text" id="output-folder" value="predicaciones" placeholder="Ej. predicaciones o E:\Prédicas" style="width: 200px; padding: 0.4rem 0.75rem; background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: var(--radius-sm); outline: none;">
+                        </label>
+
+                        <label class="control-label">
+                            <i class="fa-solid fa-list-ol"></i>
+                            <span>Máx. prédicas:</span>
+                            <select id="max-results">
+                                <option value="50">50 prédicas</option>
+                                <option value="100">100 prédicas</option>
+                                <option value="300">300 prédicas</option>
+                                <option value="500">500 prédicas</option>
+                                <option value="1000">1000 prédicas</option>
+                                <option value="0" selected>Todas las prédicas (Sin límite)</option>
+                            </select>
+                        </label>
+
+                        <label class="toggle-checkbox">
+                            <input type="checkbox" id="timestamps-toggle">
+                            <span class="checkmark"></span>
+                            <span>Incluir marcas de tiempo [00:00]</span>
+                        </label>
+                    </div>
+
+                    <button type="submit" id="btn-search" class="btn btn-primary">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <span>Obtener Prédicas</span>
+                    </button>
+                </form>
+            </section>
+
+            <!-- Status / Notification Alert -->
+            <div id="status-bar" class="status-bar hidden">
+                <div class="status-icon"><i class="fa-solid fa-circle-notch fa-spin"></i></div>
+                <div id="status-message" class="status-message">Buscando predicaciones en el canal...</div>
+            </div>
+
+            <!-- Dashboard Toolbar -->
+            <section id="results-header" class="results-header hidden">
+                <div class="results-info">
+                    <h2><i class="fa-solid fa-layer-group"></i> Listado de Prédicas Encontradas (<span id="count-badge">0</span>)</h2>
+                </div>
+                <div class="results-actions">
+                    <label class="toggle-checkbox" style="font-size:0.85rem">
+                        <input type="checkbox" id="select-all" checked>
+                        <span class="checkmark"></span>
+                        <span>Todo</span>
+                    </label>
+                    <div class="search-filter">
+                        <i class="fa-solid fa-filter"></i>
+                        <input type="text" id="filter-input" placeholder="Filtrar por título...">
+                    </div>
+                    <button id="btn-transcribe-all" class="btn btn-secondary">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <span>Transcribir Seleccionadas</span>
+                    </button>
+                    <button id="btn-stop" class="btn btn-outline hidden" style="border-color:var(--accent-danger);color:var(--accent-danger)">
+                        <i class="fa-solid fa-stop"></i>
+                        <span>Detener</span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Video Grid -->
+            <section id="video-grid" class="video-grid">
+                <!-- Video Cards will be inserted dynamically here -->
+            </section>
+        </main>
+    </div>
+
+    <!-- Transcript Viewer Modal -->
+    <div id="transcript-modal" class="modal hidden">
+        <div class="modal-overlay" id="modal-overlay"></div>
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title-area">
+                    <span class="badge"><i class="fa-solid fa-file-lines"></i> Transcripción Completa</span>
+                    <h3 id="modal-video-title">Título del Video</h3>
+                    <a id="modal-video-link" href="#" target="_blank" class="video-link">
+                        <i class="fa-brands fa-youtube"></i> Ver en YouTube
+                    </a>
+                </div>
+                <button id="btn-close-modal" class="btn-icon"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="modal-body">
+                <div class="transcript-toolbar">
+                    <div class="search-inside">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="text" id="transcript-search" placeholder="Buscar palabra en la transcripción...">
+                    </div>
+                    <div class="actions">
+                        <button id="btn-copy" class="btn btn-outline">
+                            <i class="fa-regular fa-copy"></i> <span>Copiar Texto</span>
+                        </button>
+                        <button id="btn-download-modal" class="btn btn-success">
+                            <i class="fa-solid fa-download"></i> <span>Descargar .TXT</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="transcript-container">
+                    <pre id="transcript-text">Cargando transcripción...</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom JS -->
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

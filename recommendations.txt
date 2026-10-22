@@ -1,0 +1,22 @@
+Recomendaciones prácticas para transcribir videos sin subtítulos:
+
+1. **Mejorar yt-dlp**:
+   - Cambiar User-Agent a uno de escritorio: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+   - Eliminar 'quiet' y 'no_warnings' para ver errores reales
+   - Añadir retrasos entre intentos (time.sleep(5))
+
+2. **Usar Playwright para obtener subtítulos automáticos**:
+   - La función fetch_transcript_via_timedtext ya existe, pero requiere Playwright
+   - Esta extensión de navegador (Pro) ya lo implementa exitosamente
+
+3. **Mejorar el manejo de errores**:
+   - Añadir reintentos con delays (3, 8, 20 segundos)
+   - Verificar si el video tiene subtítulos antes de intentar transcribir
+
+4. **Implementar transcripción local como fallback principal**:
+   - Cambiar el flujo para usar Whisper como primer método
+   - Solo usar YouTube API si YouTube subtitles están disponibles
+
+Recomendación específica:
+Modifica la función transcribe_with_whisper para que use un idioma configurable y añada mejor manejo de errores. 
+Esto solucionará la mayoría de los casos sin cambiar la arquitectura del sistema.

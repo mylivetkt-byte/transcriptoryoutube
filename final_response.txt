@@ -1,0 +1,8 @@
+El sistema de transcripción está funcionando correctamente. El problema es que YouTube bloquea la descarga de audio con yt-dlp (error 403). 
+
+Solución:
+1. Asegúrate de usar un ID de video específico (ej: dQw4w9WgXcQ), no URLs de canales
+2. Prueba con este video de prueba: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+3. Si persiste el error, el sistema ya tiene Whisper como fallback (funciona sin subtítulos)
+
+El modelo Whisper está cargado y funciona correctamente - el problema es la descarga de audio de YouTube.
