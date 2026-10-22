@@ -91,10 +91,26 @@ def get_channel_videos(channel_url, max_results=0):
 
 
 def get_cookie_file():
-    """Obtiene la ruta del archivo de cookies, creándolo desde la variable de entorno si existe."""
+    """Obtiene la ruta del archivo de cookies, creándolo desde la variable de entorno base64 si existe."""
+    import tempfile
+    import base64
+
+    # 1. Intentar desde variable BASE64 (la más segura para Coolify/Docker)
+    b64_cookies = os.getenv("YOUTUBE_COOKIES_BASE64", "").strip()
+    if b64_cookies:
+        tmp_cookie = os.path.join(tempfile.gettempdir(), "youtube_cookies.txt")
+        try:
+            decoded = base64.b64decode(b64_cookies).decode("utf-8", errors="ignore")
+            with open(tmp_cookie, "w", encoding="utf-8") as f:
+                f.write(decoded)
+            print(f"[Cookies] Cargadas cookies exitosamente desde YOUTUBE_COOKIES_BASE64 ({len(decoded)} bytes)")
+            return tmp_cookie
+        except Exception as e:
+            print(f"[Cookies] Error decodificando YOUTUBE_COOKIES_BASE64: {e}")
+
+    # 2. Intentar desde variable de entorno de texto plano
     env_cookies = os.getenv("YOUTUBE_COOKIES", "").strip()
     if env_cookies:
-        import tempfile
         tmp_cookie = os.path.join(tempfile.gettempdir(), "youtube_cookies.txt")
         try:
             with open(tmp_cookie, "w", encoding="utf-8") as f:
@@ -102,6 +118,8 @@ def get_cookie_file():
             return tmp_cookie
         except Exception as e:
             print(f"[Cookies] Error escribiendo cookies de entorno: {e}")
+
+    # 3. Intentar desde archivo local cookies.txt
     base_dir = os.path.dirname(os.path.abspath(__file__))
     local_cookie = os.path.join(base_dir, "cookies.txt")
     if os.path.exists(local_cookie):

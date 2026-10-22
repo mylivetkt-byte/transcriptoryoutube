@@ -28,3 +28,7 @@ Thumbs.db
 transcripciones/
 predicaciones/
 predicaciones_test/
+
+# Secrets & Cookies
+cookies.txt
+*cookies*.txt
