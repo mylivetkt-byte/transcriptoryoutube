@@ -1,5 +1,5 @@
 document.addEventListener("DOMContentLoaded", () => {
-    // DOM Elements
+    // Referencias a Elementos del DOM
     const channelForm = document.getElementById("channel-form");
     const channelUrlInput = document.getElementById("channel-url");
     const maxResultsSelect = document.getElementById("max-results");
@@ -18,8 +18,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const videoGrid = document.getElementById("video-grid");
 
     const transcriptModal = document.getElementById("transcript-modal");
-    const modalOverlay = document.getElementById("modal-overlay");
-    const btnCloseModal = document.getElementById("btn-close-modal");
     const modalVideoTitle = document.getElementById("modal-video-title");
     const modalVideoLink = document.getElementById("modal-video-link");
     const transcriptText = document.getElementById("transcript-text");
@@ -27,13 +25,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnCopy = document.getElementById("btn-copy");
     const btnDownloadModal = document.getElementById("btn-download-modal");
 
-    // State
+    // Estado de la aplicación
     let currentVideos = [];
     let currentActiveVideo = null;
     let rawTranscriptText = "";
-    let cancelled = false;
+    let activeAbortController = null;
 
-    // Show status helper
+    // Helper de Estado Accesible con Live Region
     function showStatus(message, isError = false, isLoading = true) {
         statusBar.classList.remove("hidden", "error");
         if (isError) {
@@ -54,13 +52,13 @@ document.addEventListener("DOMContentLoaded", () => {
         statusBar.classList.add("hidden");
     }
 
-    // Extract channel videos
+    // Extracción de videos del canal
     channelForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         const url = channelUrlInput.value.trim();
         if (!url) return;
 
-        showStatus("Buscando prédicas y extractos del canal de YouTube...", false, true);
+        showStatus("Buscando prédicas en el canal de YouTube...", false, true);
         btnSearch.disabled = true;
 
         try {
@@ -69,8 +67,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     url: url,
-                    max_results: parseInt(maxResultsSelect.value)
-                })
+                    max_results: parseInt(maxResultsSelect.value, 10)
+                }),
+                signal: AbortSignal.timeout(45000)
             });
 
             const data = await resp.json();
@@ -98,56 +97,58 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Render Video Grid
+    // Renderizado atómico del Grid con DocumentFragment y replaceChildren()
     function renderVideoGrid(videos) {
-        videoGrid.innerHTML = "";
+        const fragment = document.createDocumentFragment();
+
         videos.forEach(video => {
-            const card = document.createElement("div");
+            const card = document.createElement("article");
             card.className = "video-card selected";
             card.dataset.title = video.title.toLowerCase();
 
             card.innerHTML = `
                 <div class="thumbnail-wrapper">
-                    <input type="checkbox" class="card-checkbox" checked data-id="${video.id}">
-                    <img src="${video.thumbnail}" alt="${video.title}" loading="lazy" onerror="this.src='https://via.placeholder.com/480x270?text=Sin+Imagen'">
+                    <input type="checkbox" class="card-checkbox" checked data-id="${video.id}" aria-label="Seleccionar ${video.title}">
+                    <img src="${video.thumbnail}" alt="${video.title}" loading="lazy" width="480" height="270" onerror="this.src='https://via.placeholder.com/480x270?text=Sin+Imagen'">
                     <span class="duration-badge">${video.duration}</span>
                 </div>
                 <div class="card-body">
                     <h3 class="video-title">${video.title}</h3>
                     <div class="card-footer">
-                        <button class="btn btn-primary btn-card-transcribe" data-id="${video.id}" data-title="${encodeURIComponent(video.title)}">
+                        <button type="button" class="btn btn-primary btn-card-transcribe" data-id="${video.id}" data-title="${encodeURIComponent(video.title)}">
                             <i class="fa-solid fa-file-signature"></i> Transcribir
                         </button>
                     </div>
                 </div>
             `;
-            videoGrid.appendChild(card);
 
             const chk = card.querySelector(".card-checkbox");
             chk.addEventListener("change", () => {
                 card.classList.toggle("selected", chk.checked);
             });
-        });
-        // Add event listeners to transcribe buttons
-        document.querySelectorAll(".btn-card-transcribe").forEach(btn => {
-            btn.addEventListener("click", (e) => {
-                const vid = btn.dataset.id;
-                const title = decodeURIComponent(btn.dataset.title);
-                transcribeVideo(vid, title, btn);
+
+            const btn = card.querySelector(".btn-card-transcribe");
+            btn.addEventListener("click", () => {
+                transcribeVideo(video.id, video.title, btn);
             });
+
+            fragment.appendChild(card);
         });
+
+        // Reemplazo atómico sin parseo repetido de HTML
+        videoGrid.replaceChildren(fragment);
     }
 
-    // Filter videos by title
+    // Filtrar prédicas en vivo
     filterInput.addEventListener("input", () => {
         const query = filterInput.value.toLowerCase().trim();
-        const cards = document.querySelectorAll(".video-card");
+        const cards = videoGrid.querySelectorAll(".video-card");
         let visibleCount = 0;
 
         cards.forEach(card => {
             const title = card.dataset.title || "";
             if (title.includes(query)) {
-                card.style.display = "flex";
+                card.style.display = "grid";
                 visibleCount++;
             } else {
                 card.style.display = "none";
@@ -157,44 +158,39 @@ document.addEventListener("DOMContentLoaded", () => {
         countBadge.textContent = visibleCount;
     });
 
-    // Select all / deselect all
+    // Seleccionar / Deseleccionar todo
     selectAllCheckbox.addEventListener("change", () => {
         const checked = selectAllCheckbox.checked;
-        document.querySelectorAll(".card-checkbox:not(:disabled)").forEach(c => {
+        videoGrid.querySelectorAll(".card-checkbox:not(:disabled)").forEach(c => {
             c.checked = checked;
             c.closest(".video-card").classList.toggle("selected", checked);
         });
     });
 
-    // Stop button
-    btnStop.addEventListener("click", () => {
-        cancelled = true;
-        btnStop.classList.add("hidden");
-    });
-
-    async function triggerDownload(videoId, title, text) {
+    // Descarga instantánea en el cliente usando Blob (sin consumir servidor)
+    function downloadTextFile(title, videoId, text) {
         try {
-            const resp = await fetch("/api/download-txt", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title, video_id: videoId, text })
-            });
-            const blob = await resp.blob();
-            const url = window.URL.createObjectURL(blob);
+            const cleanName = title.replace(/[\\/*?:"<>|]/g, "_").trim();
+            const filename = videoId ? `${cleanName} [${videoId}].txt` : `${cleanName}.txt`;
+            const fileContent = `Título: ${title}\nURL: https://www.youtube.com/watch?v=${videoId}\n${"=".repeat(50)}\n\n${text}`;
+            
+            const blob = new Blob([fileContent], { type: "text/plain;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
-            a.style.display = "none";
             a.href = url;
-            a.download = `${title}.txt`;
+            a.download = filename;
+            a.style.display = "none";
             document.body.appendChild(a);
             a.click();
-            window.URL.revokeObjectURL(url);
+            a.remove();
+            URL.revokeObjectURL(url);
         } catch (err) {
-            console.error("Error al descargar:", err);
+            console.error("Error al descargar archivo local:", err);
         }
     }
 
-    // Transcribe single video — auto-download to browser
-    async function transcribeVideo(videoId, title, triggerBtn = null) {
+    // Transcripción de un video individual con AbortSignal
+    async function transcribeVideo(videoId, title, triggerBtn = null, signal = null) {
         if (triggerBtn) {
             triggerBtn.disabled = true;
             triggerBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Procesando...';
@@ -217,7 +213,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     title: title,
                     include_timestamps: timestampsToggle.checked,
                     languages: ["es", "es-419", "es-ES", "es-MX", "en"]
-                })
+                }),
+                signal: signal || AbortSignal.timeout(300000)
             });
 
             clearTimeout(whisperHint);
@@ -236,22 +233,40 @@ document.addEventListener("DOMContentLoaded", () => {
                 triggerBtn.disabled = false;
             }
 
-            await triggerDownload(videoId, title, data.transcript);
-            openTranscriptModal(videoId, title, data.transcript);
+            downloadTextFile(title, videoId, data.transcript);
+            if (!signal) {
+                openTranscriptModal(videoId, title, data.transcript);
+            }
+            return true;
 
         } catch (err) {
             clearTimeout(whisperHint);
-            showStatus(`❌ Error en "${title}": ${err.message}`, true, false);
+            if (err.name === "AbortError") {
+                showStatus(`Cancelado: "${title}"`, true, false);
+            } else {
+                showStatus(`❌ Error en "${title}": ${err.message}`, true, false);
+            }
             if (triggerBtn) {
                 triggerBtn.disabled = false;
-                triggerBtn.innerHTML = '<i class="fa-solid fa-file-signature"></i> Transcribir Prédica';
+                triggerBtn.className = "btn btn-outline btn-card-transcribe";
+                triggerBtn.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Reintentar';
             }
+            return false;
         }
     }
 
-    // Transcribir todas las seleccionadas
+    // Botón Detener: AbortController real que interrumpe la conexión de red
+    btnStop.addEventListener("click", () => {
+        if (activeAbortController) {
+            activeAbortController.abort();
+            activeAbortController = null;
+        }
+        btnStop.classList.add("hidden");
+    });
+
+    // Transcripción masiva por lotes
     btnTranscribeAll.addEventListener("click", async () => {
-        const selectedCards = Array.from(document.querySelectorAll(".video-card.selected"))
+        const selectedCards = Array.from(videoGrid.querySelectorAll(".video-card.selected"))
             .filter(c => c.style.display !== "none");
 
         if (selectedCards.length === 0) {
@@ -259,7 +274,7 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        cancelled = false;
+        activeAbortController = new AbortController();
         btnTranscribeAll.disabled = true;
         btnStop.classList.remove("hidden");
         showStatus(`Iniciando transcripción masiva (${selectedCards.length} prédicas)...`, false, true);
@@ -268,7 +283,7 @@ document.addEventListener("DOMContentLoaded", () => {
         let failCount = 0;
 
         for (let i = 0; i < selectedCards.length; i++) {
-            if (cancelled) {
+            if (activeAbortController.signal.aborted) {
                 showStatus(`❌ Proceso detenido por el usuario. ${successCount} completadas, ${failCount} fallidas.`, true, false);
                 break;
             }
@@ -281,55 +296,27 @@ document.addEventListener("DOMContentLoaded", () => {
             const title = decodeURIComponent(btn.dataset.title);
 
             showStatus(`[${i+1}/${selectedCards.length}] Transcribiendo: "${title}"...`, false, true);
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Transcribiendo...';
 
-            try {
-                const resp = await fetch("/api/transcribe", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        video_id: vid,
-                        title: title,
-                        include_timestamps: timestampsToggle.checked,
-                        languages: ["es", "es-419", "es-ES", "es-MX", "en"]
-                    })
-                });
-
-                const data = await resp.json();
-
-                if (!resp.ok) {
-                    throw new Error(data.error || "No disponible");
-                }
-
+            const ok = await transcribeVideo(vid, title, btn, activeAbortController.signal);
+            if (ok) {
                 successCount++;
-                btn.className = "btn btn-success btn-card-transcribe";
-                btn.innerHTML = '<i class="fa-solid fa-check"></i> Descargado';
-                btn.disabled = false;
-
-                await triggerDownload(vid, title, data.transcript);
-
-            } catch (err) {
+            } else {
                 failCount++;
-                btn.className = "btn btn-outline btn-card-transcribe";
-                btn.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Sin transcripción';
-                btn.disabled = false;
             }
 
-            if (i < selectedCards.length - 1 && !cancelled) {
-                await new Promise(r => setTimeout(r, 3000));
+            if (i < selectedCards.length - 1 && !activeAbortController.signal.aborted) {
+                await new Promise(r => setTimeout(r, 2000));
             }
         }
 
         btnStop.classList.add("hidden");
         btnTranscribeAll.disabled = false;
-        if (!cancelled) {
+        if (!activeAbortController.signal.aborted) {
             showStatus(`Proceso completado: ${successCount} descargadas, ${failCount} sin transcripción.`, false, false);
         }
     });
 
-
-    // Open Modal
+    // Control del <dialog> Nativo
     function openTranscriptModal(videoId, title, transcript) {
         currentActiveVideo = { id: videoId, title: title };
         rawTranscriptText = transcript;
@@ -339,18 +326,26 @@ document.addEventListener("DOMContentLoaded", () => {
         transcriptText.textContent = transcript;
         transcriptSearch.value = "";
 
-        transcriptModal.classList.remove("hidden");
+        // showModal() nativo: Top layer, inert page, trampa de foco y backdrop
+        transcriptModal.showModal();
     }
 
-    // Close Modal
-    function closeModal() {
-        transcriptModal.classList.add("hidden");
+    // Fallback para light-dismiss en navegadores sin soporte nativo de closedby="any"
+    if (!('closedBy' in HTMLDialogElement.prototype)) {
+        transcriptModal.addEventListener('click', (event) => {
+            if (event.target !== transcriptModal) return;
+            const rect = transcriptModal.getBoundingClientRect();
+            const isInDialog = (
+                rect.top <= event.clientY && event.clientY <= rect.top + rect.height &&
+                rect.left <= event.clientX && event.clientX <= rect.left + rect.width
+            );
+            if (!isInDialog) {
+                transcriptModal.close();
+            }
+        });
     }
 
-    btnCloseModal.addEventListener("click", closeModal);
-    modalOverlay.addEventListener("click", closeModal);
-
-    // Search within transcript
+    // Búsqueda dentro de la transcripción
     transcriptSearch.addEventListener("input", () => {
         const query = transcriptSearch.value.trim().toLowerCase();
         if (!query) {
@@ -368,47 +363,35 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Copy to clipboard
+    // Copiado al Portapapeles con Live Region (Patrón Copy Button de Modern Web Guidance)
+    const copyStatus = document.querySelector(".copy-status");
+    let copyTimer = null;
+
     btnCopy.addEventListener("click", async () => {
         if (!rawTranscriptText) return;
+        clearTimeout(copyTimer);
+        btnCopy.removeAttribute("data-copied");
+        btnCopy.removeAttribute("data-failed");
+
         try {
             await navigator.clipboard.writeText(rawTranscriptText);
-            const origHTML = btnCopy.innerHTML;
-            btnCopy.innerHTML = '<i class="fa-solid fa-check"></i> <span>¡Copiado!</span>';
-            setTimeout(() => {
-                btnCopy.innerHTML = origHTML;
-            }, 2000);
-        } catch (err) {
-            alert("No se pudo copiar automáticamente. Puedes seleccionar el texto manualmente.");
+            btnCopy.setAttribute("data-copied", "");
+            copyStatus.textContent = "¡Copiado!";
+        } catch {
+            btnCopy.setAttribute("data-failed", "");
+            copyStatus.textContent = "Error al copiar";
         }
+
+        copyTimer = setTimeout(() => {
+            btnCopy.removeAttribute("data-copied");
+            btnCopy.removeAttribute("data-failed");
+            copyStatus.textContent = "";
+        }, 2200);
     });
 
-    // Download TXT
-    btnDownloadModal.addEventListener("click", async () => {
+    // Descarga desde el modal
+    btnDownloadModal.addEventListener("click", () => {
         if (!currentActiveVideo || !rawTranscriptText) return;
-
-        try {
-            const resp = await fetch("/api/download-txt", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    title: currentActiveVideo.title,
-                    video_id: currentActiveVideo.id,
-                    text: rawTranscriptText
-                })
-            });
-
-            const blob = await resp.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.style.display = "none";
-            a.href = url;
-            a.download = `${currentActiveVideo.title}.txt`;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-        } catch (err) {
-            alert("Error al descargar el archivo .txt");
-        }
+        downloadTextFile(currentActiveVideo.title, currentActiveVideo.id, rawTranscriptText);
     });
 });

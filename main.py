@@ -32,6 +32,7 @@ def get_channel_videos(channel_url, max_videos=None):
         'quiet': True,
         'no_warnings': True,
         'ignoreerrors': True,
+        'extractor_args': {'youtube': {'player_client': ['android', 'ios']}},
     }
 
     videos = []

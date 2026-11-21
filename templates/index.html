@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
     <title>Transcriptor de Predicaciones - YouTube</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -19,7 +20,7 @@
         <header class="app-header">
             <div class="logo-area">
                 <div class="logo-icon">
-                    <i class="fa-solid fa-microphone-lines"></i>
+                    <i class="fa-solid fa-microphone-lines" aria-hidden="true"></i>
                 </div>
                 <div>
                     <h1>Transcriptor de Predicaciones</h1>
@@ -30,29 +31,31 @@
 
         <!-- Main Search Bar Card -->
         <main class="main-content">
-            <section class="search-card">
+            <section class="search-card" aria-label="Búsqueda de canal">
                 <form id="channel-form" class="search-form">
                     <div class="input-wrapper">
-                        <i class="fa-brands fa-youtube input-icon"></i>
+                        <i class="fa-brands fa-youtube input-icon" aria-hidden="true"></i>
                         <input 
                             type="url" 
                             id="channel-url" 
                             placeholder="Pega la URL del canal (ej. https://www.youtube.com/@iglesiacmg)" 
                             required
                             value="https://www.youtube.com/@iglesiacmg"
+                            autocomplete="off"
+                            aria-label="URL del canal de YouTube"
                         >
                     </div>
                     <div class="options-wrapper">
                         <label class="control-label">
-                            <i class="fa-solid fa-folder-open"></i>
+                            <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
                             <span>Carpeta de guardado:</span>
-                            <input type="text" id="output-folder" value="predicaciones" placeholder="Ej. predicaciones o E:\Prédicas" style="width: 200px; padding: 0.4rem 0.75rem; background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: var(--radius-sm); outline: none;">
+                            <input type="text" id="output-folder" value="predicaciones" placeholder="Ej. predicaciones" style="width: 200px; padding: 0.4rem 0.75rem; background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: var(--radius-sm); outline: none;">
                         </label>
 
                         <label class="control-label">
-                            <i class="fa-solid fa-list-ol"></i>
+                            <i class="fa-solid fa-list-ol" aria-hidden="true"></i>
                             <span>Máx. prédicas:</span>
-                            <select id="max-results">
+                            <select id="max-results" aria-label="Cantidad máxima de resultados">
                                 <option value="50">50 prédicas</option>
                                 <option value="100">100 prédicas</option>
                                 <option value="300">300 prédicas</option>
@@ -70,22 +73,22 @@
                     </div>
 
                     <button type="submit" id="btn-search" class="btn btn-primary">
-                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
                         <span>Obtener Prédicas</span>
                     </button>
                 </form>
             </section>
 
-            <!-- Status / Notification Alert -->
-            <div id="status-bar" class="status-bar hidden">
+            <!-- Status / Notification Alert (Live Region) -->
+            <div id="status-bar" class="status-bar hidden" role="status" aria-live="polite">
                 <div class="status-icon"><i class="fa-solid fa-circle-notch fa-spin"></i></div>
                 <div id="status-message" class="status-message">Buscando predicaciones en el canal...</div>
             </div>
 
             <!-- Dashboard Toolbar -->
-            <section id="results-header" class="results-header hidden">
+            <section id="results-header" class="results-header hidden" aria-label="Resultados y controles">
                 <div class="results-info">
-                    <h2><i class="fa-solid fa-layer-group"></i> Listado de Prédicas Encontradas (<span id="count-badge">0</span>)</h2>
+                    <h2><i class="fa-solid fa-layer-group" aria-hidden="true"></i> Listado de Prédicas Encontradas (<span id="count-badge">0</span>)</h2>
                 </div>
                 <div class="results-actions">
                     <label class="toggle-checkbox" style="font-size:0.85rem">
@@ -94,64 +97,70 @@
                         <span>Todo</span>
                     </label>
                     <div class="search-filter">
-                        <i class="fa-solid fa-filter"></i>
-                        <input type="text" id="filter-input" placeholder="Filtrar por título...">
+                        <i class="fa-solid fa-filter" aria-hidden="true"></i>
+                        <input type="search" id="filter-input" placeholder="Filtrar por título..." aria-label="Filtrar prédicas por título">
                     </div>
-                    <button id="btn-transcribe-all" class="btn btn-secondary">
-                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    <button id="btn-transcribe-all" class="btn btn-secondary" type="button">
+                        <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
                         <span>Transcribir Seleccionadas</span>
                     </button>
-                    <button id="btn-stop" class="btn btn-outline hidden" style="border-color:var(--accent-danger);color:var(--accent-danger)">
-                        <i class="fa-solid fa-stop"></i>
+                    <button id="btn-stop" class="btn btn-outline hidden" type="button" style="border-color:var(--accent-danger);color:var(--accent-danger)">
+                        <i class="fa-solid fa-stop" aria-hidden="true"></i>
                         <span>Detener</span>
                     </button>
                 </div>
             </section>
 
             <!-- Video Grid -->
-            <section id="video-grid" class="video-grid">
+            <section id="video-grid" class="video-grid" aria-label="Rejilla de prédicas">
                 <!-- Video Cards will be inserted dynamically here -->
             </section>
         </main>
     </div>
 
-    <!-- Transcript Viewer Modal -->
-    <div id="transcript-modal" class="modal hidden">
-        <div class="modal-overlay" id="modal-overlay"></div>
+    <!-- Transcript Viewer Native Modal (<dialog>) -->
+    <dialog id="transcript-modal" class="modal-dialog" closedby="any" aria-labelledby="modal-video-title">
         <div class="modal-card">
-            <div class="modal-header">
+            <header class="modal-header">
                 <div class="modal-title-area">
-                    <span class="badge"><i class="fa-solid fa-file-lines"></i> Transcripción Completa</span>
+                    <span class="badge"><i class="fa-solid fa-file-lines" aria-hidden="true"></i> Transcripción Completa</span>
                     <h3 id="modal-video-title">Título del Video</h3>
-                    <a id="modal-video-link" href="#" target="_blank" class="video-link">
-                        <i class="fa-brands fa-youtube"></i> Ver en YouTube
+                    <a id="modal-video-link" href="#" target="_blank" rel="noopener noreferrer" class="video-link">
+                        <i class="fa-brands fa-youtube" aria-hidden="true"></i> Ver en YouTube
                     </a>
                 </div>
-                <button id="btn-close-modal" class="btn-icon"><i class="fa-solid fa-xmark"></i></button>
-            </div>
+                <form method="dialog">
+                    <button id="btn-close-modal" type="submit" class="btn-icon" aria-label="Cerrar ventana">
+                        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                    </button>
+                </form>
+            </header>
 
             <div class="modal-body">
                 <div class="transcript-toolbar">
                     <div class="search-inside">
-                        <i class="fa-solid fa-magnifying-glass"></i>
-                        <input type="text" id="transcript-search" placeholder="Buscar palabra en la transcripción...">
+                        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                        <input type="search" id="transcript-search" placeholder="Buscar palabra en la transcripción..." aria-label="Buscar dentro de la transcripción">
                     </div>
                     <div class="actions">
-                        <button id="btn-copy" class="btn btn-outline">
-                            <i class="fa-regular fa-copy"></i> <span>Copiar Texto</span>
-                        </button>
-                        <button id="btn-download-modal" class="btn btn-success">
-                            <i class="fa-solid fa-download"></i> <span>Descargar .TXT</span>
+                        <span class="copy-wrapper">
+                            <button id="btn-copy" type="button" class="btn btn-outline" aria-label="Copiar texto de la transcripción">
+                                <i class="fa-regular fa-copy" aria-hidden="true"></i> <span>Copiar Texto</span>
+                            </button>
+                            <span class="copy-status" role="status" aria-live="polite"></span>
+                        </span>
+                        <button id="btn-download-modal" type="button" class="btn btn-success">
+                            <i class="fa-solid fa-download" aria-hidden="true"></i> <span>Descargar .TXT</span>
                         </button>
                     </div>
                 </div>
 
-                <div class="transcript-container">
+                <div class="transcript-container" tabindex="0" role="region" aria-label="Contenido de la transcripción">
                     <pre id="transcript-text">Cargando transcripción...</pre>
                 </div>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- Custom JS -->
     <script src="{{ url_for('static', filename='script.js') }}"></script>

@@ -39,16 +39,20 @@ def get_channel_videos(channel_url, max_results=0):
     if not channel_url.endswith("/videos") and not channel_url.endswith("/streams") and "/watch" not in channel_url:
         channel_url = channel_url.rstrip("/") + "/videos"
 
+    cookie_file = get_cookie_file()
     ydl_opts = {
         'extract_flat': True,
         'skip_download': True,
         'quiet': True,
         'no_warnings': True,
         'ignoreerrors': True,
+        'extractor_args': {'youtube': {'player_client': ['android', 'ios']}},
         'http_headers': {
             'Accept-Language': 'es-ES,es;q=0.9,es-419;q=0.8'
         }
     }
+    if cookie_file:
+        ydl_opts['cookiefile'] = cookie_file
 
     videos = []
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -197,14 +201,17 @@ def get_whisper_model():
     global _whisper_model
     if _whisper_model is None:
         try:
-            import whisper
+            import importlib
+            whisper = importlib.import_module("whisper")  # type: ignore
             print(f"[Whisper] Cargando modelo '{WHISPER_MODEL_SIZE}'...")
             _whisper_model = whisper.load_model(WHISPER_MODEL_SIZE)
             print("[Whisper] Modelo listo.")
-        except ImportError:
-            print("[Whisper] ERROR: openai-whisper no está instalado. Ejecuta: pip install openai-whisper")
+        except (ImportError, ModuleNotFoundError):
+            # Whisper no está instalado (comportamiento esperado en producción ligera/Docker)
+            _whisper_model = None
         except Exception as e:
             print(f"[Whisper] Error cargando modelo: {e}")
+            _whisper_model = None
     return _whisper_model
 
 
@@ -441,20 +448,33 @@ def fetch_transcript(video_id, languages=('es', 'es-419', 'es-ES', 'es-MX', 'en'
     try:
         import tempfile
         tmpdir = tempfile.mkdtemp()
+        sub_langs = ['es', 'es-orig', 'es-419', 'es-ES', 'es-MX']
+        for l in languages:
+            if l not in sub_langs:
+                sub_langs.append(l)
+
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
+            'ignoreerrors': True,
             'skip_download': True,
             'writesubtitles': True,
             'writeautomaticsub': True,
-            'subtitleslangs': list(languages) + ['es', 'es-419', 'en'],
+            'subtitleslangs': sub_langs,
+            'extractor_args': {'youtube': {'player_client': ['android', 'ios']}},
             'outtmpl': os.path.join(tmpdir, '%(id)s.%(ext)s'),
+            'http_headers': {
+                'Accept-Language': 'es-ES,es;q=0.9,es-419;q=0.8'
+            }
         }
         if cookie_file:
             ydl_opts['cookiefile'] = cookie_file
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+        except Exception as dl_err:
+            print(f"[Subtítulos yt-dlp] Nota descarga: {dl_err}")
 
         sub_files = [f for f in os.listdir(tmpdir) if f.endswith(('.vtt', '.srt', '.ttml'))]
         if sub_files:
@@ -537,15 +557,18 @@ def fetch_transcript(video_id, languages=('es', 'es-419', 'es-ES', 'es-MX', 'en'
             'skip_download': True,
             'writesubtitles': True,
             'writeautomaticsub': True,
-            'subtitleslangs': list(languages) + ['es', 'en'],
+            'subtitleslangs': list(languages) + ['es', 'es-orig', 'en'],
             'quiet': True,
             'no_warnings': True,
-            'extractor_args': {'youtube': {'player_client': ['ios', 'android', 'mweb']}},
+            'ignoreerrors': True,
+            'extractor_args': {'youtube': {'player_client': ['android', 'ios']}},
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15',
                 'Accept-Language': 'es-ES,es;q=0.9,es-419;q=0.8'
             }
         }
+        if cookie_file:
+            ydl_opts['cookiefile'] = cookie_file
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
             subs = info.get('subtitles') or info.get('automatic_captions') or {}
@@ -634,7 +657,7 @@ def api_transcribe():
     text = fetch_transcript(video_id, languages=languages, include_timestamps=include_timestamps)
 
     if not text:
-        return jsonify({"error": "No se pudo obtener la transcripción. El video no tiene subtítulos ni se pudo transcribir con Whisper."}), 404
+        return jsonify({"error": "No se pudo obtener la transcripción. El video no tiene subtítulos disponibles en YouTube."}), 404
 
     return jsonify({
         "video_id": video_id,

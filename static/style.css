@@ -1,5 +1,8 @@
 /* Modern Dark Theme Design System */
 :root {
+    color-scheme: dark;
+    scrollbar-gutter: stable;
+
     --bg-main: #0b0f19;
     --bg-card: rgba(21, 28, 45, 0.7);
     --bg-card-hover: rgba(30, 41, 67, 0.85);
@@ -308,33 +311,42 @@ h1 {
     outline: none;
 }
 
-/* Video Grid */
+/* ============================================================
+   VIDEO GRID CON SUBGRID (Alineación uniforme de títulos y botones)
+   ============================================================ */
 .video-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(clamp(260px, 28vw, 320px), 1fr));
     gap: 1.5rem;
 }
 
-/* Video Card */
 .video-card {
     background: var(--bg-card);
     backdrop-filter: var(--glass-backdrop);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    transition: all 0.3s ease;
     position: relative;
+    transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+
+    /* Optimización de rendimiento para listas grandes de videos */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 360px;
+
+    /* Configuración Subgrid: 3 filas alineadas (Miniatura, Título, Acciones) */
+    display: grid;
+    grid-row: span 3;
+    grid-template-rows: auto 1fr auto;
+    grid-template-rows: subgrid;
+}
+
+.video-card .card-body {
+    display: contents; /* Despliega los hijos en las pistas de la subgrid */
 }
 
 .video-card.selected {
     border-color: rgba(59, 130, 246, 0.5);
     box-shadow: 0 0 15px rgba(59, 130, 246, 0.1);
-}
-
-.video-card.dimmed {
-    opacity: 0.4;
 }
 
 .card-checkbox {
@@ -386,16 +398,8 @@ h1 {
     border-radius: 4px;
 }
 
-.card-body {
-    padding: 1.25rem;
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    justify-content: space-between;
-    gap: 1rem;
-}
-
 .video-title {
+    padding: 1rem 1.25rem 0.5rem;
     font-size: 0.95rem;
     font-weight: 600;
     line-height: 1.4;
@@ -407,6 +411,7 @@ h1 {
 }
 
 .card-footer {
+    padding: 0.5rem 1.25rem 1.25rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -419,32 +424,59 @@ h1 {
     font-size: 0.875rem;
 }
 
-/* Modal */
-.modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    z-index: 999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 1.5rem;
+/* ============================================================
+   MODAL NATIVO (<dialog>) Y ANIMACIONES MODERNAS
+   ============================================================ */
+dialog.modal-dialog {
+    margin: auto;
+    padding: 0;
+    border: none;
+    background: transparent;
+    max-width: 900px;
+    width: min(92vw, 900px);
+    max-height: 85vh;
+    border-radius: var(--radius-lg);
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+
+    /* Prevenir que el scroll del modal mueva la página subyacente */
+    overscroll-behavior: contain;
+
+    /* Transición suave de entrada y salida */
+    transition: opacity 0.2s ease-out, transform 0.2s ease-out, overlay 0.2s ease-out allow-discrete, display 0.2s ease-out allow-discrete;
+    opacity: 0;
+    transform: scale(0.96) translateY(10px);
 }
 
-.modal.hidden, .hidden {
-    display: none !important;
+dialog.modal-dialog[open] {
+    opacity: 1;
+    transform: scale(1) translateY(0);
 }
 
-.modal-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.75);
+@starting-style {
+    dialog.modal-dialog[open] {
+        opacity: 0;
+        transform: scale(0.96) translateY(10px);
+    }
+}
+
+dialog::backdrop {
+    background-color: rgba(0, 0, 0, 0.75);
     backdrop-filter: blur(8px);
+    overflow: hidden;
+    overscroll-behavior: contain;
+    transition: opacity 0.2s ease-out, overlay 0.2s ease-out allow-discrete, display 0.2s ease-out allow-discrete;
+    opacity: 0;
+}
+
+dialog[open]::backdrop {
+    opacity: 1;
+}
+
+@starting-style {
+    dialog[open]::backdrop {
+        opacity: 0;
+    }
 }
 
 .modal-card {
@@ -453,12 +485,9 @@ h1 {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     width: 100%;
-    max-width: 900px;
     max-height: 85vh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
-    z-index: 10;
     overflow: hidden;
 }
 
@@ -501,6 +530,10 @@ h1 {
     font-size: 1.25rem;
     cursor: pointer;
     padding: 0.4rem;
+}
+
+.btn-icon:hover {
+    color: var(--text-primary);
 }
 
 .modal-body {
@@ -560,4 +593,40 @@ h1 {
     font-size: 0.95rem;
     line-height: 1.7;
     color: #e2e8f0;
+}
+
+/* ============================================================
+   FEEDBACK ACCESIBLE PARA COPIADO AL PORTAPAPELES
+   ============================================================ */
+.copy-wrapper {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.copy-status {
+    position: absolute;
+    inset-block-start: -2rem;
+    inset-inline-start: 50%;
+    transform: translateX(-50%);
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid var(--accent-primary);
+    color: var(--text-primary);
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.2rem 0.6rem;
+    border-radius: var(--radius-sm);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease-in-out;
+    white-space: nowrap;
+}
+
+button[data-copied] + .copy-status,
+button[data-failed] + .copy-status {
+    opacity: 1;
+}
+
+.hidden {
+    display: none !important;
 }
