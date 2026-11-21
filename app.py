@@ -95,11 +95,19 @@ def get_channel_videos(channel_url, max_results=0):
 
 
 def get_cookie_file():
-    """Obtiene la ruta del archivo de cookies, creándolo desde la variable de entorno base64 si existe."""
+    """Obtiene la ruta del archivo de cookies, priorizando cookies locales sincronizadas o variables de entorno."""
     import tempfile
     import base64
 
-    # 1. Intentar desde variable BASE64 (la más segura para Coolify/Docker)
+    # 1. Intentar desde archivo local cookies.txt (especialmente si fue actualizado por /api/sync-cookies)
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    local_cookie = os.path.join(base_dir, "cookies.txt")
+    if os.path.exists(local_cookie) and os.path.getsize(local_cookie) > 200:
+        return local_cookie
+    if os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 200:
+        return os.path.abspath("cookies.txt")
+
+    # 2. Intentar desde variable BASE64 (Coolify/Docker fallback inicial)
     b64_cookies = os.getenv("YOUTUBE_COOKIES_BASE64", "").strip()
     if b64_cookies:
         tmp_cookie = os.path.join(tempfile.gettempdir(), "youtube_cookies.txt")
@@ -112,7 +120,7 @@ def get_cookie_file():
         except Exception as e:
             print(f"[Cookies] Error decodificando YOUTUBE_COOKIES_BASE64: {e}")
 
-    # 2. Intentar desde variable de entorno de texto plano
+    # 3. Intentar desde variable de entorno de texto plano
     env_cookies = os.getenv("YOUTUBE_COOKIES", "").strip()
     if env_cookies:
         tmp_cookie = os.path.join(tempfile.gettempdir(), "youtube_cookies.txt")
@@ -123,13 +131,6 @@ def get_cookie_file():
         except Exception as e:
             print(f"[Cookies] Error escribiendo cookies de entorno: {e}")
 
-    # 3. Intentar desde archivo local cookies.txt
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    local_cookie = os.path.join(base_dir, "cookies.txt")
-    if os.path.exists(local_cookie):
-        return local_cookie
-    if os.path.exists("cookies.txt"):
-        return os.path.abspath("cookies.txt")
     return None
 
 def parse_vtt_subtitles(content, include_timestamps=False):
@@ -736,6 +737,67 @@ def api_save_batch_transcript():
         "filename": filename,
         "title": title
     })
+
+@app.route("/api/sync-cookies", methods=["POST"])
+def api_sync_cookies():
+    """Recibe cookies vivas desde la extensión de Chrome y actualiza cookies.txt en el servidor sin reiniciar."""
+    token = request.headers.get("X-Sync-Token") or request.args.get("token") or (request.get_json() or {}).get("token")
+    expected_token = os.environ.get("SYNC_TOKEN", "cmg-transcriptor-2026")
+
+    if token != expected_token:
+        return jsonify({"error": "No autorizado. Token de sincronización inválido."}), 403
+
+    data = request.get_json() or {}
+    cookies_list = data.get("cookies_list") or []
+    cookies_netscape = data.get("cookies_netscape", "").strip()
+
+    if cookies_list:
+        lines = [
+            "# Netscape HTTP Cookie File",
+            "# https://curl.haxx.se/rfc/cookie_spec.html",
+            "# Generated automatically by Transcriptor Chrome Extension",
+            ""
+        ]
+        for c in cookies_list:
+            domain = c.get("domain", "")
+            include_sub = "TRUE" if domain.startswith(".") else "FALSE"
+            path = c.get("path", "/")
+            secure = "TRUE" if c.get("secure") else "FALSE"
+            expires = str(int(c.get("expirationDate", 2147483647)))
+            name = c.get("name", "")
+            value = c.get("value", "")
+            if name and value:
+                lines.append(f"{domain}\t{include_sub}\t{path}\t{secure}\t{expires}\t{name}\t{value}")
+        cookies_netscape = "\n".join(lines)
+
+    if not cookies_netscape:
+        return jsonify({"error": "No se recibieron cookies para sincronizar."}), 400
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    local_cookie = os.path.join(base_dir, "cookies.txt")
+
+    try:
+        with open(local_cookie, "w", encoding="utf-8") as f:
+            f.write(cookies_netscape)
+
+        import tempfile
+        tmp_cookie = os.path.join(tempfile.gettempdir(), "youtube_cookies.txt")
+        try:
+            with open(tmp_cookie, "w", encoding="utf-8") as tf:
+                tf.write(cookies_netscape)
+        except Exception:
+            pass
+
+        print(f"[Cookies] Sincronización exitosa desde extensión: {len(cookies_list)} cookies ({len(cookies_netscape)} bytes).")
+        return jsonify({
+            "success": True,
+            "message": "Cookies de YouTube actualizadas con éxito en el servidor.",
+            "cookies_count": len(cookies_list),
+            "bytes": len(cookies_netscape)
+        })
+    except Exception as e:
+        print(f"[Cookies] Error guardando cookies sincronizadas: {e}")
+        return jsonify({"error": f"Error al guardar cookies: {e}"}), 500
 
 if __name__ == "__main__":
     print("Iniciando servidor web Transcriptor en http://localhost:5000")

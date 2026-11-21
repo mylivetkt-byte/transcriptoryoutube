@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Transcriptor YouTube - Auto Cookie Sync",
+  "version": "1.0.0",
+  "description": "Sincroniza cookies de YouTube automáticamente con el servidor para evitar bloqueos y transcripciones fallidas.",
+  "permissions": [
+    "cookies",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "https://descargasyoutube.grupocmg.digital/*",
+    "http://localhost:5000/*",
+    "http://127.0.0.1:5000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Sincronizador de Cookies"
+  }
+}
